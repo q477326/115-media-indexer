@@ -5,7 +5,7 @@ import { loadAppSettings } from '../services/appSettings'
 const PRESETS = {
   kibin: {
     label: '骑兵整理',
-    storageKey: 'organizer-task-panel-form-kibin-v1',
+    storageKey: 'organizer-task-panel-form-kibin-v2',
     defaultForm: {
       source_root: '/mnt/clouddrive/115open/原始库/不正常视频/qb/骑兵',
       output_root: '/mnt/clouddrive/115open/原始库/小姐姐/骑兵',
@@ -46,7 +46,7 @@ const PRESETS = {
 }
 
 const PRESET_STORAGE_KEY = 'organizer-task-panel-preset-v1'
-const STATE_STORAGE_KEY = 'organizer-task-panel-state-v6'
+const STATE_STORAGE_KEY = 'organizer-task-panel-state-v7'
 const FINAL_SCAN_STATUSES = ['success', 'failed', 'stopped']
 const FINAL_JOB_STATUSES = ['success', 'failed', 'stopped']
 const EXECUTE_CHUNK_LIMIT = 5000
