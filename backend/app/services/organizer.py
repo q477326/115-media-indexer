@@ -322,7 +322,6 @@ def _retry_missing_reference_media_file_ids(
             OrganizerJob.mode == "reference_based",
             OrganizerJob.source_id == source_id,
             OrganizerJob.reference_source_id == reference_source_id,
-            OrganizerJob.reference_scope_prefix == reference_scope_prefix,
             OrganizerJob.status == "success",
             OrganizerItem.status.in_(("missing_reference", "unidentified")),
         )
