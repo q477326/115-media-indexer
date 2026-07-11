@@ -106,16 +106,16 @@ def organizer_job_summary(db: Session, job_id: int) -> dict:
             OrganizerExecutionLog.status == "failed",
         )
     ) or 0
-    moved_exists = exists().where(
+    completed_exists = exists().where(
         OrganizerExecutionLog.organizer_job_id == job.id,
         OrganizerExecutionLog.organizer_item_id == OrganizerItem.id,
-        OrganizerExecutionLog.status == "moved",
+        OrganizerExecutionLog.status.in_(("moved", "skipped")),
     )
     remaining_ready_count = db.scalar(
         select(func.count()).select_from(OrganizerItem).where(
             OrganizerItem.job_id == job.id,
             OrganizerItem.status == "ready",
-            ~moved_exists,
+            ~completed_exists,
         )
     ) or 0
     scan_job = latest_scan_for_source(db, source.id)

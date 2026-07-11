@@ -121,17 +121,17 @@ def _selected_items(db: Session, job_id: int, status_filter: str, limit: int) ->
         raise ValueError("第一阶段只允许执行 reference_based organizer job")
     if status_filter != "ready":
         raise ValueError("第一阶段只允许执行 status=ready")
-    moved_exists = exists().where(
+    completed_exists = exists().where(
         OrganizerExecutionLog.organizer_job_id == job_id,
         OrganizerExecutionLog.organizer_item_id == OrganizerItem.id,
-        OrganizerExecutionLog.status == "moved",
+        OrganizerExecutionLog.status.in_(("moved", "skipped")),
     )
     items = db.scalars(
         select(OrganizerItem)
         .where(
             OrganizerItem.job_id == job_id,
             OrganizerItem.status == status_filter,
-            ~moved_exists,
+            ~completed_exists,
         )
         .order_by(OrganizerItem.id)
         .limit(limit)
