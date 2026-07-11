@@ -336,8 +336,8 @@ def test_reference_retry_skips_item_when_source_file_no_longer_exists(client, me
 
     first_job_response = client.post("/api/v1/organizer/task/jobs", json={
         "source_root": str(media_root),
-        "output_root": "/mnt/clouddrive/test/妤犳垵鍙?",
-        "reference_scope_prefix": "妤犳垵鍙?",
+        "output_root": "/mnt/clouddrive/test/retry",
+        "reference_scope_prefix": "retry/",
         "reference_source_id": reference_source_id,
         "batch_limit": 100,
     })
@@ -351,8 +351,8 @@ def test_reference_retry_skips_item_when_source_file_no_longer_exists(client, me
         db.add(ReferenceItem(
             source_id=reference_source_id,
             identifier="DVMM-414",
-            reference_path="妤犳垵鍙?A/DVMM-414/DVMM-414.strm",
-            reference_dir="妤犳垵鍙?A/DVMM-414",
+            reference_path="retry/A/DVMM-414/DVMM-414.strm",
+            reference_dir="retry/A/DVMM-414",
             filename="DVMM-414.strm",
             ext="strm",
             size=1,
@@ -362,8 +362,8 @@ def test_reference_retry_skips_item_when_source_file_no_longer_exists(client, me
 
     second_job_response = client.post("/api/v1/organizer/task/jobs", json={
         "source_root": str(media_root),
-        "output_root": "/mnt/clouddrive/test/妤犳垵鍙?",
-        "reference_scope_prefix": "妤犳垵鍙?",
+        "output_root": "/mnt/clouddrive/test/retry",
+        "reference_scope_prefix": "retry/",
         "reference_source_id": reference_source_id,
         "batch_limit": 100,
     })

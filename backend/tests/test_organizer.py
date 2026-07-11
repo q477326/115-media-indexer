@@ -103,11 +103,11 @@ def test_reference_based_organizer_dry_run_only_uses_kibin_reference_scope(clien
             MediaFile(source_id=media_source.id, provider="local_fs", local_path="/dup/a.mp4", filename="a.mp4", path="/dup/a.mp4", size=1, identifier="DUP-100", status="identified"),
         ])
         db.add_all([
-            ReferenceItem(source_id=reference_source.id, identifier="PRED-107", reference_path="骑兵/阿由叶亚美/PRED-107/PRED-107.strm", reference_dir="骑兵/阿由叶亚美/PRED-107", filename="PRED-107.strm", ext="strm", size=1, status="identified"),
-            ReferenceItem(source_id=reference_source.id, identifier="348NTR-102", reference_path="骑兵/なみ26歳コーヒーショップ勤務/348NTR-102/348NTR-102.strm", reference_dir="骑兵/なみ26歳コーヒーショップ勤務/348NTR-102", filename="348NTR-102.strm", ext="strm", size=1, status="identified"),
+            ReferenceItem(source_id=reference_source.id, identifier="PRED-107", reference_path="kibin/ayuha/PRED-107/PRED-107.strm", reference_dir="kibin/ayuha/PRED-107", filename="PRED-107.strm", ext="strm", size=1, status="identified"),
+            ReferenceItem(source_id=reference_source.id, identifier="348NTR-102", reference_path="kibin/nami/348NTR-102/348NTR-102.strm", reference_dir="kibin/nami/348NTR-102", filename="348NTR-102.strm", ext="strm", size=1, status="identified"),
             ReferenceItem(source_id=reference_source.id, identifier="FC2-1650265", reference_path="FC2/[RED]/FC2-1650265/FC2-1650265.strm", reference_dir="FC2/[RED]/FC2-1650265", filename="FC2-1650265.strm", ext="strm", size=1, status="identified"),
-            ReferenceItem(source_id=reference_source.id, identifier="DUP-100", reference_path="骑兵/A/DUP-100/DUP-100-cd1.strm", reference_dir="骑兵/A/DUP-100", filename="DUP-100-cd1.strm", ext="strm", size=1, status="duplicate"),
-            ReferenceItem(source_id=reference_source.id, identifier="DUP-100", reference_path="骑兵/A/DUP-100/DUP-100-cd2.strm", reference_dir="骑兵/A/DUP-100", filename="DUP-100-cd2.strm", ext="strm", size=1, status="duplicate"),
+            ReferenceItem(source_id=reference_source.id, identifier="DUP-100", reference_path="kibin/A/DUP-100/DUP-100-cd1.strm", reference_dir="kibin/A/DUP-100", filename="DUP-100-cd1.strm", ext="strm", size=1, status="duplicate"),
+            ReferenceItem(source_id=reference_source.id, identifier="DUP-100", reference_path="kibin/A/DUP-100/DUP-100-cd2.strm", reference_dir="kibin/A/DUP-100", filename="DUP-100-cd2.strm", ext="strm", size=1, status="duplicate"),
         ])
         db.commit()
         media_source_id = media_source.id
@@ -117,8 +117,8 @@ def test_reference_based_organizer_dry_run_only_uses_kibin_reference_scope(clien
         "mode": "reference_based",
         "source_id": media_source_id,
         "reference_source_id": reference_source_id,
-        "reference_scope_prefix": "骑兵/",
-        "output_root": "/vol02/1000-1-2846ebc3/吴猛/小姐姐/骑兵",
+        "reference_scope_prefix": "kibin/",
+        "output_root": "/mnt/clouddrive/output/kibin",
         "filename_strategy": "preserve_source_filename",
     })
     assert response.status_code == 202, response.text
@@ -134,8 +134,8 @@ def test_reference_based_organizer_dry_run_only_uses_kibin_reference_scope(clien
 
     ready = client.get(f"/api/v1/organizer/jobs/{job['id']}/items", params={"status": "ready"}).json()
     targets = {item["identifier"]: item["target_path"] for item in ready["items"]}
-    assert targets["PRED-107"] == "/vol02/1000-1-2846ebc3/吴猛/小姐姐/骑兵/阿由叶亚美/PRED-107/98T@PRED-107.mp4"
-    assert targets["348NTR-102"] == "/vol02/1000-1-2846ebc3/吴猛/小姐姐/骑兵/なみ26歳コーヒーショップ勤務/348NTR-102/348NTR-102.mp4"
+    assert targets["PRED-107"] == "/mnt/clouddrive/output/kibin/ayuha/PRED-107/98T@PRED-107.mp4"
+    assert targets["348NTR-102"] == "/mnt/clouddrive/output/kibin/nami/348NTR-102/348NTR-102.mp4"
     assert all("/mnt/reference-strm" not in item["target_path"] for item in ready["items"])
     assert all("/vol1/1000/media/小姐姐" not in item["target_path"] for item in ready["items"])
     assert all("骑兵/骑兵" not in item["target_path"] for item in ready["items"])
@@ -185,7 +185,7 @@ def test_reference_based_match_reference_filename_with_source_suffix(client):
         "source_id": media_source_id,
         "reference_source_id": reference_source_id,
         "reference_scope_prefix": "kibin/",
-        "output_root": "/output/kibin",
+        "output_root": "/mnt/clouddrive/output/kibin",
         "filename_strategy": "match_reference_filename_with_source_suffix",
     })
     assert response.status_code == 202, response.text
@@ -208,3 +208,172 @@ def test_reference_based_match_reference_filename_with_source_suffix(client):
     assert ready["total"] == len(expected_filenames)
     for item in ready["items"]:
         assert item["target_path"].rsplit("/", 1)[-1] == expected_filenames[item["identifier"]]
+
+
+def test_reference_based_can_match_western_embedded_filename_exactly(client):
+    with SessionLocal() as db:
+        media_source = Source(name="CloudDrive2", provider_type="local_fs", root_path="/mnt/clouddrive")
+        reference_source = ReferenceSource(name="STRM", provider_type="local_strm", root_path="/mnt/reference-strm")
+        db.add_all([media_source, reference_source])
+        db.flush()
+        db.add(
+            MediaFile(
+                source_id=media_source.id,
+                provider="local_fs",
+                local_path="/raw/Funky/[AnalVids.com] FIRST PISS! Beautiful teen Funky Town drink urine & 5 big cocks fucked in all her sweetie holes EKS135.mp4",
+                filename="[AnalVids.com] FIRST PISS! Beautiful teen Funky Town drink urine & 5 big cocks fucked in all her sweetie holes EKS135.mp4",
+                path="/raw/Funky/[AnalVids.com] FIRST PISS! Beautiful teen Funky Town drink urine & 5 big cocks fucked in all her sweetie holes EKS135.mp4",
+                size=1,
+                identifier=None,
+                status="unidentified",
+            )
+        )
+        db.add(
+            ReferenceItem(
+                source_id=reference_source.id,
+                identifier=None,
+                reference_path="欧美/AnalVids/AnalVids/Funky Town/ErikaKortiStudio.23.03.17/ErikaKortiStudio.23.03.17.strm",
+                reference_dir="欧美/AnalVids/AnalVids/Funky Town/ErikaKortiStudio.23.03.17",
+                filename="ErikaKortiStudio.23.03.17.strm",
+                ext="strm",
+                strm_url="http://10.10.10.112:9527/d/demo.mp4?/[AnalVids.com] FIRST PISS! Beautiful teen Funky Town drink urine & 5 big cocks fucked in all her sweetie holes EKS135.mp4",
+                embedded_filename="[AnalVids.com] FIRST PISS! Beautiful teen Funky Town drink urine & 5 big cocks fucked in all her sweetie holes EKS135.mp4",
+                normalized_embedded_filename="analvids com first piss! beautiful teen funky town drink urine & 5 big cocks fucked in all her sweetie holes eks135 mp4",
+                size=1,
+                status="identified",
+            )
+        )
+        db.commit()
+        media_source_id = media_source.id
+        reference_source_id = reference_source.id
+
+    response = client.post("/api/v1/organizer/jobs", json={
+        "mode": "reference_based",
+        "source_id": media_source_id,
+        "reference_source_id": reference_source_id,
+        "reference_scope_prefix": "欧美/",
+        "output_root": "/mnt/clouddrive/output/western",
+        "filename_strategy": "preserve_source_filename",
+    })
+    assert response.status_code == 202, response.text
+    job = wait_for_organizer(client, response.json()["id"])
+    assert job["status"] == "success"
+    assert job["status_counts"]["ready"] == 1
+    ready = client.get(f"/api/v1/organizer/jobs/{job['id']}/items", params={"status": "ready"}).json()
+    assert ready["items"][0]["target_path"] == "/mnt/clouddrive/output/western/AnalVids/AnalVids/Funky Town/ErikaKortiStudio.23.03.17/[AnalVids.com] FIRST PISS! Beautiful teen Funky Town drink urine & 5 big cocks fucked in all her sweetie holes EKS135.mp4"
+
+
+def test_reference_based_can_match_western_embedded_filename_without_identifier(client):
+    with SessionLocal() as db:
+        media_source = Source(name="CloudDrive2", provider_type="local_fs", root_path="/mnt/clouddrive")
+        reference_source = ReferenceSource(name="STRM", provider_type="local_strm", root_path="/mnt/reference-strm")
+        db.add_all([media_source, reference_source])
+        db.flush()
+        filename = "[AnalVids.com] FIRST PISS! Beautiful teen Funky Town drink urine & 5 big cocks fucked in all her sweetie holes EKS135.mp4"
+        db.add(
+            MediaFile(
+                source_id=media_source.id,
+                provider="local_fs",
+                local_path=f"/raw/Funky/{filename}",
+                filename=filename,
+                path=f"/raw/Funky/{filename}",
+                size=1,
+                identifier=None,
+                status="unidentified",
+            )
+        )
+        db.add(
+            ReferenceItem(
+                source_id=reference_source.id,
+                identifier=None,
+                reference_path="western/AnalVids/AnalVids/Funky Town/ErikaKortiStudio.23.03.17/EKS130.strm",
+                reference_dir="western/AnalVids/AnalVids/Funky Town/ErikaKortiStudio.23.03.17",
+                filename="EKS130.strm",
+                ext="strm",
+                strm_url=f"http://10.10.10.112:9527/d/demo.mp4?/{filename}",
+                embedded_filename=filename,
+                normalized_embedded_filename="analvids com first piss! beautiful teen funky town drink urine & 5 big cocks fucked in all her sweetie holes eks135 mp4",
+                size=1,
+                status="identified",
+            )
+        )
+        db.commit()
+        media_source_id = media_source.id
+        reference_source_id = reference_source.id
+
+    response = client.post("/api/v1/organizer/jobs", json={
+        "mode": "reference_based",
+        "source_id": media_source_id,
+        "reference_source_id": reference_source_id,
+        "reference_scope_prefix": "western/",
+        "output_root": "/mnt/clouddrive/output/western",
+        "filename_strategy": "match_reference_filename_with_source_suffix",
+    })
+    assert response.status_code == 202, response.text
+    job = wait_for_organizer(client, response.json()["id"])
+    assert job["status"] == "success"
+    ready = client.get(f"/api/v1/organizer/jobs/{job['id']}/items", params={"status": "ready"}).json()
+    assert ready["items"][0]["target_path"] == "/mnt/clouddrive/output/western/AnalVids/AnalVids/Funky Town/ErikaKortiStudio.23.03.17/EKS130.mp4"
+
+
+def test_reference_based_marks_duplicate_when_multiple_embedded_filename_matches(client):
+    with SessionLocal() as db:
+        media_source = Source(name="CloudDrive2", provider_type="local_fs", root_path="/mnt/clouddrive")
+        reference_source = ReferenceSource(name="STRM", provider_type="local_strm", root_path="/mnt/reference-strm")
+        db.add_all([media_source, reference_source])
+        db.flush()
+        filename = "[AnalVids.com] DUP TEST.mp4"
+        db.add(
+            MediaFile(
+                source_id=media_source.id,
+                provider="local_fs",
+                local_path=f"/raw/{filename}",
+                filename=filename,
+                path=f"/raw/{filename}",
+                size=1,
+                identifier=None,
+                status="unidentified",
+            )
+        )
+        db.add_all([
+            ReferenceItem(
+                source_id=reference_source.id,
+                identifier=None,
+                reference_path="欧美/A/one/one.strm",
+                reference_dir="欧美/A/one",
+                filename="one.strm",
+                ext="strm",
+                embedded_filename=filename,
+                normalized_embedded_filename="analvids com dup test mp4",
+                size=1,
+                status="identified",
+            ),
+            ReferenceItem(
+                source_id=reference_source.id,
+                identifier=None,
+                reference_path="欧美/B/two/two.strm",
+                reference_dir="欧美/B/two",
+                filename="two.strm",
+                ext="strm",
+                embedded_filename=filename,
+                normalized_embedded_filename="analvids com dup test mp4",
+                size=1,
+                status="identified",
+            ),
+        ])
+        db.commit()
+        media_source_id = media_source.id
+        reference_source_id = reference_source.id
+
+    response = client.post("/api/v1/organizer/jobs", json={
+        "mode": "reference_based",
+        "source_id": media_source_id,
+        "reference_source_id": reference_source_id,
+        "reference_scope_prefix": "欧美/",
+        "output_root": "/mnt/clouddrive/output/western",
+        "filename_strategy": "preserve_source_filename",
+    })
+    assert response.status_code == 202, response.text
+    job = wait_for_organizer(client, response.json()["id"])
+    assert job["status"] == "success"
+    assert job["status_counts"]["duplicate_reference"] == 1

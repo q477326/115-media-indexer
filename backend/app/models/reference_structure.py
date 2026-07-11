@@ -18,6 +18,7 @@ class ReferenceSource(Base):
     provider_type: Mapped[str] = mapped_column(String(30), default="local_strm", index=True)
     root_path: Mapped[str] = mapped_column(Text)
     enabled: Mapped[bool] = mapped_column(default=True)
+    last_scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -30,6 +31,8 @@ class ReferenceItem(Base):
         UniqueConstraint("source_id", "reference_path", name="uq_reference_source_path"),
         Index("ix_reference_items_source_identifier", "source_id", "identifier"),
         Index("ix_reference_items_source_status", "source_id", "status"),
+        Index("ix_reference_items_source_embedded_filename", "source_id", "embedded_filename"),
+        Index("ix_reference_items_source_normalized_embedded_filename", "source_id", "normalized_embedded_filename"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -39,6 +42,9 @@ class ReferenceItem(Base):
     reference_dir: Mapped[str] = mapped_column(Text)
     filename: Mapped[str] = mapped_column(Text)
     ext: Mapped[str] = mapped_column(String(20))
+    strm_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedded_filename: Mapped[str | None] = mapped_column(Text, nullable=True)
+    normalized_embedded_filename: Mapped[str | None] = mapped_column(Text, nullable=True)
     size: Mapped[int] = mapped_column(Integer, default=0)
     modified_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="identified", index=True)

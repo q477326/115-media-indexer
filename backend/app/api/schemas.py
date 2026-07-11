@@ -78,7 +78,10 @@ class WesternPosterDefaults(BaseModel):
 
 
 class AppSettingsRead(BaseModel):
-    organizer_task: OrganizerTaskDefaults
+    organizer_task_kibin: OrganizerTaskDefaults
+    organizer_task_western: OrganizerTaskDefaults
+    organizer_task_uncensored: OrganizerTaskDefaults
+    organizer_task_domestic: OrganizerTaskDefaults
     one_click_ingest: OneClickIngestDefaults
     translation_defaults: TranslationDefaults
     nfo_tag_defaults: NfoTagDefaults
@@ -99,6 +102,7 @@ class ReferenceSourceCreate(BaseModel):
 class ReferenceSourceRead(ReferenceSourceCreate):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    last_scanned_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -112,6 +116,9 @@ class ReferenceItemRead(BaseModel):
     reference_dir: str
     filename: str
     ext: str
+    strm_url: str | None
+    embedded_filename: str | None
+    normalized_embedded_filename: str | None
     size: int
     modified_time: datetime | None
     status: Literal["identified", "unidentified", "duplicate"]

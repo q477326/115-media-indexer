@@ -201,3 +201,19 @@ def run_startup_migrations(engine) -> None:
             ))
             conn.execute(text("CREATE INDEX ix_translation_file_states_watch_folder_id ON translation_file_states (watch_folder_id)"))
             conn.execute(text("CREATE INDEX ix_translation_file_states_last_status ON translation_file_states (last_status)"))
+        if "reference_items" in table_names:
+            reference_columns = {column["name"] for column in inspector.get_columns("reference_items")}
+            reference_migrations = {
+                "strm_url": "ALTER TABLE reference_items ADD COLUMN strm_url TEXT",
+                "embedded_filename": "ALTER TABLE reference_items ADD COLUMN embedded_filename TEXT",
+                "normalized_embedded_filename": "ALTER TABLE reference_items ADD COLUMN normalized_embedded_filename TEXT",
+            }
+            for column, statement in reference_migrations.items():
+                if column not in reference_columns:
+                    conn.execute(text(statement))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reference_items_source_embedded_filename ON reference_items (source_id, embedded_filename)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reference_items_source_normalized_embedded_filename ON reference_items (source_id, normalized_embedded_filename)"))
+        if "reference_sources" in table_names:
+            reference_source_columns = {column["name"] for column in inspector.get_columns("reference_sources")}
+            if "last_scanned_at" not in reference_source_columns:
+                conn.execute(text("ALTER TABLE reference_sources ADD COLUMN last_scanned_at DATETIME"))

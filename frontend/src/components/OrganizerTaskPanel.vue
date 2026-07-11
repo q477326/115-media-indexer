@@ -2,15 +2,51 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { loadAppSettings } from '../services/appSettings'
 
-const FORM_STORAGE_KEY = 'organizer-task-panel-form-v4'
-const STATE_STORAGE_KEY = 'organizer-task-panel-state-v4'
-
-const defaultForm = {
-  source_root: '/mnt/clouddrive/115open/原始库/小姐姐/骑兵',
-  output_root: '/mnt/clouddrive/115open/小姐姐/骑兵',
-  reference_scope_prefix: '骑兵/'
+const PRESETS = {
+  kibin: {
+    label: '骑兵整理',
+    storageKey: 'organizer-task-panel-form-kibin-v1',
+    defaultForm: {
+      source_root: '/mnt/clouddrive/115open/原始库/不正常视频/qb/骑兵',
+      output_root: '/mnt/clouddrive/115open/原始库/小姐姐/骑兵',
+      reference_scope_prefix: '骑兵/',
+    },
+    settingsKey: 'organizer_task_kibin',
+  },
+  western: {
+    label: '欧美整理',
+    storageKey: 'organizer-task-panel-form-western-v1',
+    defaultForm: {
+      source_root: '/mnt/clouddrive/115open/原始库/不正常视频/qb/欧美',
+      output_root: '/mnt/clouddrive/115open/原始库/小姐姐/欧美',
+      reference_scope_prefix: '欧美/',
+    },
+    settingsKey: 'organizer_task_western',
+  },
+  uncensored: {
+    label: '无码整理',
+    storageKey: 'organizer-task-panel-form-uncensored-v1',
+    defaultForm: {
+      source_root: '/mnt/clouddrive/115open/原始库/不正常视频/qb/无码',
+      output_root: '/mnt/clouddrive/115open/原始库/小姐姐/无码',
+      reference_scope_prefix: '无码/',
+    },
+    settingsKey: 'organizer_task_uncensored',
+  },
+  domestic: {
+    label: '国产整理',
+    storageKey: 'organizer-task-panel-form-domestic-v1',
+    defaultForm: {
+      source_root: '/mnt/clouddrive/115open/原始库/不正常视频/qb/国产',
+      output_root: '/mnt/clouddrive/115open/原始库/小姐姐/国产',
+      reference_scope_prefix: '国产/',
+    },
+    settingsKey: 'organizer_task_domestic',
+  },
 }
 
+const PRESET_STORAGE_KEY = 'organizer-task-panel-preset-v1'
+const STATE_STORAGE_KEY = 'organizer-task-panel-state-v6'
 const FINAL_SCAN_STATUSES = ['success', 'failed', 'stopped']
 const FINAL_JOB_STATUSES = ['success', 'failed', 'stopped']
 const EXECUTE_CHUNK_LIMIT = 5000
@@ -19,22 +55,32 @@ function sleep(ms) {
   return new Promise(resolve => window.setTimeout(resolve, ms))
 }
 
-function loadStoredForm() {
+function loadPresetType() {
   try {
-    const raw = window.localStorage.getItem(FORM_STORAGE_KEY)
-    if (!raw) return { ...defaultForm }
+    const saved = window.localStorage.getItem(PRESET_STORAGE_KEY)
+    if (saved && PRESETS[saved]) return saved
+  } catch {}
+  return 'western'
+}
+
+function loadStoredForm(presetType) {
+  const preset = PRESETS[presetType]
+  try {
+    const raw = window.localStorage.getItem(preset.storageKey)
+    if (!raw) return { ...preset.defaultForm }
     const parsed = JSON.parse(raw)
     return {
-      source_root: parsed.source_root || defaultForm.source_root,
-      output_root: parsed.output_root || defaultForm.output_root,
-      reference_scope_prefix: parsed.reference_scope_prefix || defaultForm.reference_scope_prefix
+      source_root: parsed.source_root || preset.defaultForm.source_root,
+      output_root: parsed.output_root || preset.defaultForm.output_root,
+      reference_scope_prefix: parsed.reference_scope_prefix || preset.defaultForm.reference_scope_prefix,
     }
   } catch {
-    return { ...defaultForm }
+    return { ...preset.defaultForm }
   }
 }
 
-const form = ref(loadStoredForm())
+const presetType = ref(loadPresetType())
+const form = ref(loadStoredForm(presetType.value))
 const loading = ref(false)
 const executing = ref(false)
 const error = ref('')
@@ -51,22 +97,38 @@ const scanPolling = ref(null)
 const organizerPolling = ref(null)
 
 const busy = computed(() => loading.value || executing.value)
+const currentPreset = computed(() => PRESETS[presetType.value])
 
 const canWriteMove = computed(() =>
   Boolean(
     systemStatus.value &&
       systemStatus.value.read_only_mode === false &&
       systemStatus.value.enable_remote_write === true &&
-      systemStatus.value.enable_real_move === true
-  )
+      systemStatus.value.enable_real_move === true,
+  ),
+)
+
+watch(
+  presetType,
+  value => {
+    window.localStorage.setItem(PRESET_STORAGE_KEY, value)
+    form.value = loadStoredForm(value)
+    resetActiveTaskState()
+    clearPipeline()
+    error.value = ''
+    summary.value = null
+    results.value = []
+    resultMode.value = '最近结果'
+    syncLatestTaskForCurrentSource()
+  },
 )
 
 watch(
   form,
   value => {
-    window.localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(value))
+    window.localStorage.setItem(currentPreset.value.storageKey, JSON.stringify(value))
   },
-  { deep: true }
+  { deep: true },
 )
 
 watch(
@@ -76,11 +138,12 @@ watch(
       STATE_STORAGE_KEY,
       JSON.stringify({
         activeScanId: activeScan.value?.id || null,
-        activeJobId: activeJob.value?.id || null
-      })
+        activeJobId: activeJob.value?.id || null,
+        presetType: presetType.value,
+      }),
     )
   },
-  { deep: true }
+  { deep: true },
 )
 
 async function api(path, options) {
@@ -109,7 +172,7 @@ function mapExecutionItems(items) {
     source_path: item.source_path,
     target_path: item.container_target_path || item.display_target_path,
     status: item.status,
-    error_message: item.error_message
+    error_message: item.error_message,
   }))
 }
 
@@ -121,13 +184,6 @@ function resetActiveTaskState() {
   results.value = []
   clearTimeout(scanPolling.value)
   clearTimeout(organizerPolling.value)
-  window.localStorage.setItem(
-    STATE_STORAGE_KEY,
-    JSON.stringify({
-      activeScanId: null,
-      activeJobId: null
-    })
-  )
 }
 
 async function loadSystemStatus() {
@@ -137,11 +193,13 @@ async function loadSystemStatus() {
 async function loadDefaultSettings() {
   try {
     const settings = await loadAppSettings()
+    const config = settings[currentPreset.value.settingsKey]
+    if (!config) return
     form.value = {
       ...form.value,
-      source_root: settings.organizer_task.source_root || form.value.source_root,
-      output_root: settings.organizer_task.output_root || form.value.output_root,
-      reference_scope_prefix: settings.organizer_task.reference_scope_prefix || form.value.reference_scope_prefix
+      source_root: config.source_root || form.value.source_root,
+      output_root: config.output_root || form.value.output_root,
+      reference_scope_prefix: config.reference_scope_prefix || form.value.reference_scope_prefix,
     }
   } catch {}
 }
@@ -163,8 +221,46 @@ function scheduleScanPoll(delay = 800) {
   scanPolling.value = window.setTimeout(pollScan, delay)
 }
 
+function scheduleOrganizerPoll(delay = 800) {
+  clearTimeout(organizerPolling.value)
+  organizerPolling.value = window.setTimeout(pollOrganizerJob, delay)
+}
+
 function normalizePath(value) {
   return (value || '').replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
+function jobMatchesCurrentTask(job, source) {
+  if (
+    job.mode !== 'reference_based' ||
+    job.source_id !== source.id ||
+    normalizePath(job.reference_scope_prefix || '') !== normalizePath(form.value.reference_scope_prefix)
+  ) {
+    return false
+  }
+
+  // Jobs store the NAS display path while the panel uses the container path.
+  // Comparing the CloudDrive-relative tail keeps jobs from different output
+  // directories from being resumed accidentally.
+  const containerRoot = '/mnt/clouddrive'
+  const outputTail = normalizePath(form.value.output_root).startsWith(containerRoot)
+    ? normalizePath(form.value.output_root).slice(containerRoot.length)
+    : normalizePath(form.value.output_root)
+  return normalizePath(job.output_root || '').endsWith(outputTail)
+}
+
+async function findPendingJobForCurrentTask(source, jobs = null) {
+  const allJobs = jobs || await api('/api/v1/organizer/jobs')
+  const candidates = allJobs.filter(job => jobMatchesCurrentTask(job, source))
+
+  for (const job of candidates) {
+    if (!FINAL_JOB_STATUSES.includes(job.status)) continue
+    const jobSummary = await api(`/api/v1/organizer/task/jobs/${job.id}/summary`)
+    if (Number(jobSummary.remaining_ready_count || 0) > 0) {
+      return { job, summary: jobSummary }
+    }
+  }
+  return null
 }
 
 async function syncLatestTaskForCurrentSource() {
@@ -187,15 +283,11 @@ async function syncLatestTaskForCurrentSource() {
   }
 
   const jobs = await api('/api/v1/organizer/jobs')
-  const latestJob = jobs.find(
-    item =>
-      item.mode === 'reference_based' &&
-      item.source_id === matchedSource.id &&
-      normalizePath(item.reference_scope_prefix || '') === normalizePath(form.value.reference_scope_prefix)
-  )
+  const pending = await findPendingJobForCurrentTask(matchedSource, jobs)
+  const latestJob = pending?.job || jobs.find(item => jobMatchesCurrentTask(item, matchedSource))
   if (latestJob) {
     activeJob.value = latestJob
-    await loadSummary(latestJob.id)
+    summary.value = pending?.summary || await api(`/api/v1/organizer/task/jobs/${latestJob.id}/summary`)
     if (!FINAL_JOB_STATUSES.includes(latestJob.status)) {
       scheduleOrganizerPoll(100)
     } else {
@@ -212,18 +304,11 @@ async function pollScan() {
       scheduleScanPoll()
       return
     }
-    if (activeJob.value) {
-      await loadSummary(activeJob.value.id)
-    }
+    if (activeJob.value) await loadSummary(activeJob.value.id)
   } catch (err) {
     error.value = err.message
     scheduleScanPoll(1500)
   }
-}
-
-function scheduleOrganizerPoll(delay = 800) {
-  clearTimeout(organizerPolling.value)
-  organizerPolling.value = window.setTimeout(pollOrganizerJob, delay)
 }
 
 async function pollOrganizerJob() {
@@ -273,64 +358,8 @@ async function waitForOrganizerJob(jobId) {
   }
 }
 
-async function refreshReferenceSource() {
-  setPipeline('刷新参考库', '正在同步 NAS STRM 参考结构')
-  const sources = await api('/api/v1/reference-sources')
-  const source = sources.find(item => item.enabled) || sources[0]
-  if (!source) {
-    throw new Error('没有可用的 reference source')
-  }
-  return api(`/api/v1/reference-sources/${source.id}/scan`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' }
-  })
-}
-
-async function refreshState() {
-  error.value = ''
-  await loadSystemStatus()
-  await syncLatestTaskForCurrentSource()
-  if (activeScan.value?.id) {
-    activeScan.value = await api(`/api/v1/scans/${activeScan.value.id}`)
-  }
-  if (activeJob.value?.id) {
-    activeJob.value = await api(`/api/v1/organizer/jobs/${activeJob.value.id}`)
-    await loadSummary(activeJob.value.id)
-    await loadExecutions(activeJob.value.id)
-  }
-}
-
-async function restoreState() {
-  await loadSystemStatus()
-  try {
-    await syncLatestTaskForCurrentSource()
-    const raw = window.localStorage.getItem(STATE_STORAGE_KEY)
-    if (!raw) return
-    const parsed = JSON.parse(raw)
-    if (!activeScan.value && parsed.activeScanId) {
-      activeScan.value = await api(`/api/v1/scans/${parsed.activeScanId}`)
-      if (!FINAL_SCAN_STATUSES.includes(activeScan.value.status)) {
-        scheduleScanPoll(100)
-      }
-    }
-    if (!activeJob.value && parsed.activeJobId) {
-      activeJob.value = await api(`/api/v1/organizer/jobs/${parsed.activeJobId}`)
-      await loadSummary(activeJob.value.id)
-      if (!FINAL_JOB_STATUSES.includes(activeJob.value.status)) {
-        scheduleOrganizerPoll(100)
-      } else {
-        await loadExecutions(activeJob.value.id)
-      }
-    }
-  } catch (err) {
-    error.value = err.message
-  }
-}
-
 async function runPreflightForAllReady() {
-  if (!activeJob.value) {
-    throw new Error('缺少 organizer job')
-  }
+  if (!activeJob.value) throw new Error('缺少 organizer job')
   await loadSummary(activeJob.value.id)
   const limit = Number(summary.value?.ready_count ?? 0)
   if (limit <= 0) {
@@ -339,12 +368,13 @@ async function runPreflightForAllReady() {
 
   executing.value = true
   try {
-    setPipeline('执行 preflight', `检查当前任务全部 ready：${limit} 条`)
+    setPipeline('执行 preflight', `检查当前任务全部 ready，共 ${limit} 条`)
     let offset = 0
     let requested = 0
     let passed = 0
     let failed = 0
     const mergedItems = []
+
     while (offset < limit) {
       const chunk = Math.min(EXECUTE_CHUNK_LIMIT, limit - offset)
       const data = await api(`/api/v1/organizer/jobs/${activeJob.value.id}/execute`, {
@@ -354,8 +384,8 @@ async function runPreflightForAllReady() {
           status_filter: 'ready',
           limit: chunk,
           mode: 'preflight',
-          confirm: false
-        })
+          confirm: false,
+        }),
       })
       requested += data.requested_count || 0
       passed += data.passed_count || 0
@@ -365,15 +395,16 @@ async function runPreflightForAllReady() {
       if ((data.requested_count || 0) < chunk) break
       setPipeline('执行 preflight', `已检查 ${Math.min(offset, limit)}/${limit} 条`)
     }
+
     const merged = {
       organizer_job_id: activeJob.value.id,
       requested_count: requested,
       passed_count: passed,
       failed_count: failed,
-      items: mergedItems
+      items: mergedItems,
     }
     results.value = mapExecutionItems(merged.items || [])
-    resultMode.value = `Preflight: ${merged.passed_count}/${merged.requested_count} 通过`
+    resultMode.value = `Preflight：${merged.passed_count}/${merged.requested_count} 通过`
     await loadSummary(activeJob.value.id)
     setPipeline('preflight 完成', `${merged.passed_count}/${merged.requested_count} 通过`)
     return merged
@@ -383,9 +414,7 @@ async function runPreflightForAllReady() {
 }
 
 async function executeMoveAllReady({ requireConfirm = true } = {}) {
-  if (!activeJob.value) {
-    throw new Error('缺少 organizer job')
-  }
+  if (!activeJob.value) throw new Error('缺少 organizer job')
   if (!canWriteMove.value) {
     throw new Error('当前仍是只读状态，真实 move 只有在三重写入开关全部打开后才可用')
   }
@@ -398,20 +427,21 @@ async function executeMoveAllReady({ requireConfirm = true } = {}) {
 
   if (requireConfirm) {
     const confirmed = window.confirm(
-      `将按当前设置目录执行全部 ready 条目。\n源目录：${form.value.source_root}\n输出目录：${form.value.output_root}\n参考范围：${form.value.reference_scope_prefix}\n\n本次会直接执行当前任务中全部可移动项（ready=${limit}）。确认继续？`
+      `将按当前设置目录执行全部 ready 条目。\n\n类型：${currentPreset.value.label}\n源目录：${form.value.source_root}\n输出目录：${form.value.output_root}\n参考范围：${form.value.reference_scope_prefix}\n\n本次会直接执行当前任务中全部可移动项（ready=${limit}）。确认继续？`,
     )
     if (!confirmed) return null
   }
 
   executing.value = true
   try {
-    setPipeline('执行真实 move', `执行当前任务全部 ready：${limit} 条`)
+    setPipeline('执行真实 move', `执行当前任务全部 ready，共 ${limit} 条`)
     let offset = 0
     let movedCount = 0
     let skippedCount = 0
     let failedCount = 0
     let movedSamples = []
     let failedSamples = []
+
     while (offset < limit) {
       const chunk = Math.min(EXECUTE_CHUNK_LIMIT, limit - offset)
       const data = await api(`/api/v1/organizer/jobs/${activeJob.value.id}/execute`, {
@@ -421,8 +451,8 @@ async function executeMoveAllReady({ requireConfirm = true } = {}) {
           status_filter: 'ready',
           limit: chunk,
           mode: 'move',
-          confirm: true
-        })
+          confirm: true,
+        }),
       })
       movedCount += data.moved_count || 0
       skippedCount += data.skipped_count || 0
@@ -431,21 +461,17 @@ async function executeMoveAllReady({ requireConfirm = true } = {}) {
       failedSamples = failedSamples.concat(data.failed_samples || []).slice(0, 20)
       offset += data.requested_count || 0
       setPipeline('执行真实 move', `已处理 ${Math.min(offset, limit)}/${limit} 条，已移动 ${movedCount} 条`)
-      if ((data.failed_count || 0) > 0 || (data.requested_count || 0) === 0) {
-        break
-      }
+      if ((data.failed_count || 0) > 0 || (data.requested_count || 0) === 0) break
     }
+
     const merged = {
       moved_count: movedCount,
       skipped_count: skippedCount,
       failed_count: failedCount,
       moved_samples: movedSamples,
-      failed_samples: failedSamples
+      failed_samples: failedSamples,
     }
-    results.value = [
-      ...mapExecutionItems(merged.moved_samples || []),
-      ...mapExecutionItems(merged.failed_samples || [])
-    ]
+    results.value = [...mapExecutionItems(merged.moved_samples || []), ...mapExecutionItems(merged.failed_samples || [])]
     resultMode.value = `Move：已移动 ${merged.moved_count} 条`
     await Promise.all([loadSystemStatus(), loadSummary(activeJob.value.id), loadExecutions(activeJob.value.id)])
     setPipeline('move 完成', `已移动 ${merged.moved_count} 条`)
@@ -462,8 +488,22 @@ async function runOneClickExecute() {
     return
   }
 
+  let pending = null
+  try {
+    const normalizedSourceRoot = normalizePath(form.value.source_root)
+    const sources = await api('/api/v1/sources')
+    const source = sources.find(item => normalizePath(item.root_path) === normalizedSourceRoot)
+    if (source) pending = await findPendingJobForCurrentTask(source)
+  } catch (err) {
+    error.value = err.message
+    return
+  }
+
+  const executionPlan = pending
+    ? `检测到当前目录已有未完成任务 #${pending.job.id}，剩余 ${pending.summary.remaining_ready_count} 条 ready 项。\n\n本次将优先继续该任务，不会让新增的未识别或缺少参考文件阻塞这批待整理项目。`
+    : '当前没有可续跑的 ready 项，将执行：增量扫描 → dry-run → preflight → move。'
   const confirmed = window.confirm(
-    `将严格按当前设置目录新建任务并直接执行全部可移动文件。\n\n源目录：${form.value.source_root}\n输出目录：${form.value.output_root}\n参考范围：${form.value.reference_scope_prefix}\n\n流程：扫描 → dry-run → preflight → move（全部 ready）\n确认继续？`
+    `将严格按当前设置目录执行可移动文件。\n\n类型：${currentPreset.value.label}\n源目录：${form.value.source_root}\n输出目录：${form.value.output_root}\n参考范围：${form.value.reference_scope_prefix}\n\n${executionPlan}\n\n确认继续？`,
   )
   if (!confirmed) return
 
@@ -474,14 +514,32 @@ async function runOneClickExecute() {
   resultMode.value = '一键执行结果'
 
   try {
+    if (pending) {
+      activeSource.value = pending.job.source_id
+        ? (await api('/api/v1/sources')).find(item => item.id === pending.job.source_id) || null
+        : null
+      activeJob.value = pending.job
+      summary.value = pending.summary
+      setPipeline('继续待整理任务', `organizer_job #${pending.job.id}，剩余 ${pending.summary.remaining_ready_count} 条 ready`)
+
+      loading.value = false
+      const preflight = await runPreflightForAllReady()
+      if ((preflight.requested_count || 0) === 0) {
+        setPipeline('没有可执行项目', '当前任务没有 ready 项')
+        return
+      }
+      await executeMoveAllReady({ requireConfirm: false })
+      return
+    }
+
     setPipeline('提交扫描', form.value.source_root)
     const scanData = await api('/api/v1/organizer/task/scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         source_root: form.value.source_root,
-        name: 'Organizer Task Source'
-      })
+        name: `Organizer Task Source · ${currentPreset.value.label}`,
+      }),
     })
     activeSource.value = scanData.source
     activeScan.value = scanData.scan_job
@@ -495,8 +553,8 @@ async function runOneClickExecute() {
       body: JSON.stringify({
         source_root: form.value.source_root,
         output_root: form.value.output_root,
-        reference_scope_prefix: form.value.reference_scope_prefix
-      })
+        reference_scope_prefix: form.value.reference_scope_prefix,
+      }),
     })
 
     await waitForOrganizerJob(activeJob.value.id)
@@ -523,6 +581,44 @@ async function runOneClickExecute() {
   }
 }
 
+async function refreshState() {
+  error.value = ''
+  await loadSystemStatus()
+  await syncLatestTaskForCurrentSource()
+  if (activeScan.value?.id) activeScan.value = await api(`/api/v1/scans/${activeScan.value.id}`)
+  if (activeJob.value?.id) {
+    activeJob.value = await api(`/api/v1/organizer/jobs/${activeJob.value.id}`)
+    await loadSummary(activeJob.value.id)
+    await loadExecutions(activeJob.value.id)
+  }
+}
+
+async function restoreState() {
+  await loadSystemStatus()
+  try {
+    await syncLatestTaskForCurrentSource()
+    const raw = window.localStorage.getItem(STATE_STORAGE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw)
+    if (parsed.presetType && parsed.presetType !== presetType.value) return
+    if (!activeScan.value && parsed.activeScanId) {
+      activeScan.value = await api(`/api/v1/scans/${parsed.activeScanId}`)
+      if (!FINAL_SCAN_STATUSES.includes(activeScan.value.status)) scheduleScanPoll(100)
+    }
+    if (!activeJob.value && parsed.activeJobId) {
+      activeJob.value = await api(`/api/v1/organizer/jobs/${parsed.activeJobId}`)
+      await loadSummary(activeJob.value.id)
+      if (!FINAL_JOB_STATUSES.includes(activeJob.value.status)) {
+        scheduleOrganizerPoll(100)
+      } else {
+        await loadExecutions(activeJob.value.id)
+      }
+    }
+  } catch (err) {
+    error.value = err.message
+  }
+}
+
 onMounted(async () => {
   await loadDefaultSettings()
   restoreState()
@@ -540,9 +636,16 @@ onUnmounted(() => {
       <div>
         <span class="eyebrow">ORGANIZER TASKS</span>
         <h3>整理任务面板</h3>
-        <p>只保留一个入口：按当前设置目录，一键扫描、生成 dry-run、preflight，并执行全部 ready。</p>
+        <p>骑兵、欧美、无码和国产使用四套专用逻辑，互不混用。先选择类型，再执行一键整理。</p>
       </div>
       <button @click="refreshState">刷新状态</button>
+    </div>
+
+    <div class="preset-switch">
+      <button :class="['preset-btn', { active: presetType === 'kibin' }]" @click="presetType = 'kibin'">骑兵整理</button>
+      <button :class="['preset-btn', { active: presetType === 'western' }]" @click="presetType = 'western'">欧美整理</button>
+      <button :class="['preset-btn', { active: presetType === 'uncensored' }]" @click="presetType = 'uncensored'">无码整理</button>
+      <button :class="['preset-btn', { active: presetType === 'domestic' }]" @click="presetType = 'domestic'">国产整理</button>
     </div>
 
     <p v-if="error" class="task-error">{{ error }}</p>
@@ -553,6 +656,7 @@ onUnmounted(() => {
     </div>
 
     <div v-if="summary" class="task-note">
+      <p><strong>当前类型：</strong>{{ currentPreset.label }}</p>
       <p><strong>当前任务 source_root：</strong>{{ summary.source_root }}</p>
       <p><strong>当前任务 output_root：</strong>{{ summary.output_root }}</p>
       <p><strong>当前任务 reference_scope_prefix：</strong>{{ summary.reference_scope_prefix }}</p>
@@ -561,11 +665,11 @@ onUnmounted(() => {
     <div class="task-form">
       <label class="grow">
         <span>源目录</span>
-        <input v-model="form.source_root" placeholder="/mnt/clouddrive/115open/原始库/小姐姐/骑兵">
+        <input v-model="form.source_root" placeholder="/mnt/clouddrive/115open/原始库/不正常视频/qb/骑兵">
       </label>
       <label class="grow">
         <span>输出目录</span>
-        <input v-model="form.output_root" placeholder="/mnt/clouddrive/115open/小姐姐/骑兵">
+        <input v-model="form.output_root" placeholder="/mnt/clouddrive/115open/原始库/小姐姐/骑兵">
       </label>
       <label>
         <span>参考库范围</span>
@@ -578,8 +682,8 @@ onUnmounted(() => {
     </div>
 
     <div class="task-note">
-      <p>现在不再需要填写批次数量，也不再保留预演 / 继续下一批入口。</p>
-      <p>点击“一键执行”后，系统会按当前设置目录执行全部 ready 项；小批量增量整理更省心。</p>
+      <p>当前预设：<strong>{{ currentPreset.label }}</strong></p>
+      <p>三个预设分别使用独立的源目录、输出目录和参考范围，不会互相覆盖。</p>
       <p v-if="systemStatus">
         当前写入状态：
         READ_ONLY_MODE={{ systemStatus.read_only_mode }},
@@ -652,133 +756,56 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.task-panel {
-  display: grid;
-  gap: 1rem;
+.task-panel { display: grid; gap: 1rem; }
+.task-head, .task-actions, .task-grid, .result-head { display: flex; gap: 1rem; justify-content: space-between; align-items: center; }
+.task-actions-primary { justify-content: flex-start; }
+.preset-switch { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+.preset-btn {
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.55);
+  color: #e5e7eb;
 }
-
-.task-head,
-.task-actions,
-.task-grid,
-.result-head {
-  display: flex;
-  gap: 1rem;
-  justify-content: space-between;
-  align-items: center;
+.preset-btn.active {
+  background: linear-gradient(135deg, #ea580c, #f97316);
+  color: white;
+  border-color: rgba(249, 115, 22, 0.4);
 }
-
-.task-actions-primary {
-  justify-content: flex-start;
-}
-
-.task-form {
-  display: grid;
-  gap: 0.9rem;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.task-form label,
-.task-card {
+.task-form { display: grid; gap: 0.9rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.task-form label, .task-card {
   background: rgba(11, 18, 32, 0.7);
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 18px;
   padding: 1rem;
 }
-
-.task-form label {
-  display: grid;
-  gap: 0.45rem;
-}
-
-.task-form .grow {
-  grid-column: span 1;
-}
-
-.task-form input {
-  width: 100%;
-}
-
-.task-note,
-.task-error {
+.task-form label { display: grid; gap: 0.45rem; }
+.task-form input { width: 100%; }
+.task-note, .task-error {
   background: rgba(15, 23, 42, 0.75);
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 16px;
   padding: 0.9rem 1rem;
 }
-
-.task-stage {
-  border-color: rgba(249, 115, 22, 0.35);
-}
-
-.task-error {
-  color: #fecaca;
-  border-color: rgba(248, 113, 113, 0.25);
-}
-
-.task-grid {
-  align-items: stretch;
-}
-
-.task-grid .task-card {
-  flex: 1;
-}
-
-.task-card dl {
-  margin: 0;
-  display: grid;
-  gap: 0.75rem;
-}
-
-.task-card dl div {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.stats-grid {
-  display: grid;
-  gap: 0.75rem;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.stats-grid div {
-  display: grid;
-  gap: 0.25rem;
-}
-
-.stats-grid strong {
-  font-size: 1.3rem;
-}
-
-.danger {
-  min-width: 10rem;
-  background: linear-gradient(135deg, #b91c1c, #ef4444);
-  color: #fff;
-}
-
-button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.task-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.task-table th,
-.task-table td {
+.task-stage { border-color: rgba(249, 115, 22, 0.35); }
+.task-error { color: #fecaca; border-color: rgba(248, 113, 113, 0.25); }
+.task-grid { align-items: stretch; }
+.task-grid .task-card { flex: 1; }
+.task-card dl { margin: 0; display: grid; gap: 0.75rem; }
+.task-card dl div { display: flex; justify-content: space-between; gap: 1rem; }
+.stats-grid { display: grid; gap: 0.75rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.stats-grid div { display: grid; gap: 0.25rem; }
+.stats-grid strong { font-size: 1.3rem; }
+.danger { min-width: 10rem; background: linear-gradient(135deg, #b91c1c, #ef4444); color: #fff; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+.task-table { width: 100%; border-collapse: collapse; }
+.task-table th, .task-table td {
   padding: 0.8rem;
   border-bottom: 1px solid rgba(148, 163, 184, 0.15);
   text-align: left;
   vertical-align: top;
 }
-
-.task-table .path {
-  max-width: 22rem;
-  word-break: break-all;
-}
-
+.task-table .path { max-width: 22rem; word-break: break-all; }
 .task-status {
   display: inline-flex;
   align-items: center;
@@ -786,85 +813,35 @@ button:disabled {
   border-radius: 999px;
   background: rgba(148, 163, 184, 0.15);
 }
-
-.task-status.passed,
-.task-status.moved,
-.task-status.ready {
+.task-status.passed, .task-status.moved, .task-status.ready {
   background: rgba(34, 197, 94, 0.18);
   color: #bbf7d0;
 }
-
-.task-status.failed,
-.task-status.skipped {
+.task-status.failed, .task-status.skipped {
   background: rgba(248, 113, 113, 0.18);
   color: #fecaca;
 }
-
 @media (max-width: 1100px) {
-  .task-form {
-    grid-template-columns: 1fr;
-  }
-
-  .task-head,
-  .task-actions,
-  .task-grid,
-  .result-head {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .stats-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  .task-form { grid-template-columns: 1fr; }
+  .task-head, .task-actions, .task-grid, .result-head { flex-direction: column; align-items: stretch; }
+  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-
 @media (max-width: 760px) {
-  .task-panel {
-    gap: 0.85rem;
-  }
-
-  .task-form label,
-  .task-card,
-  .task-note,
-  .task-error {
-    padding: 0.85rem;
-  }
-
-  .task-actions > * {
-    width: 100%;
-  }
-
-  .danger {
-    width: 100%;
-    min-width: 0;
-  }
-
-  .task-card dl div,
-  .result-head,
-  .task-head {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
+  .task-panel { gap: 0.85rem; }
+  .task-form label, .task-card, .task-note, .task-error { padding: 0.85rem; }
+  .task-actions > * { width: 100%; }
+  .danger { width: 100%; min-width: 0; }
+  .task-card dl div, .result-head, .task-head { flex-direction: column; align-items: flex-start; }
   .table-wrap {
     margin: 0 -0.25rem;
     padding: 0 0.25rem 0.25rem;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
-
-  .task-table {
-    min-width: 760px;
-  }
-
-  .task-table .path {
-    max-width: 14rem;
-  }
+  .task-table { min-width: 760px; }
+  .task-table .path { max-width: 14rem; }
 }
-
 @media (max-width: 480px) {
-  .stats-grid {
-    grid-template-columns: 1fr;
-  }
+  .stats-grid { grid-template-columns: 1fr; }
 }
 </style>

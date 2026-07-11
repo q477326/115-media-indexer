@@ -56,7 +56,7 @@ async function saveDefaults() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(settings.value),
     })
-    success.value = '默认设置已保存到数据库，换浏览器后也会直接生效。'
+    success.value = '默认设置已保存到数据库，换浏览器或换设备后也会直接生效。'
   } catch (err) {
     error.value = err.message
   } finally {
@@ -118,9 +118,7 @@ async function testTranslationApi() {
   }
 }
 
-onMounted(() => {
-  loadAll()
-})
+onMounted(loadAll)
 </script>
 
 <template>
@@ -129,7 +127,7 @@ onMounted(() => {
       <div>
         <span class="eyebrow">SETTINGS CENTER</span>
         <h3>设置中心</h3>
-        <p>把常用目录、提示词和接口参数统一保存到数据库，换浏览器或换设备也能直接继续用。</p>
+        <p>把常用目录、提示词和接口参数统一保存到数据库，换浏览器或换设备也能继续用。</p>
       </div>
       <button @click="loadAll">刷新</button>
     </div>
@@ -146,18 +144,66 @@ onMounted(() => {
 
     <div v-if="settings" class="settings-grid">
       <section class="settings-card">
-        <h4>整理任务默认值</h4>
+        <h4>骑兵整理默认值</h4>
         <label>
           <span>源目录</span>
-          <input v-model="settings.organizer_task.source_root">
+          <input v-model="settings.organizer_task_kibin.source_root">
         </label>
         <label>
           <span>输出目录</span>
-          <input v-model="settings.organizer_task.output_root">
+          <input v-model="settings.organizer_task_kibin.output_root">
         </label>
         <label>
           <span>参考范围前缀</span>
-          <input v-model="settings.organizer_task.reference_scope_prefix">
+          <input v-model="settings.organizer_task_kibin.reference_scope_prefix">
+        </label>
+      </section>
+
+      <section class="settings-card">
+        <h4>欧美整理默认值</h4>
+        <label>
+          <span>源目录</span>
+          <input v-model="settings.organizer_task_western.source_root">
+        </label>
+        <label>
+          <span>输出目录</span>
+          <input v-model="settings.organizer_task_western.output_root">
+        </label>
+        <label>
+          <span>参考范围前缀</span>
+          <input v-model="settings.organizer_task_western.reference_scope_prefix">
+        </label>
+      </section>
+
+      <section class="settings-card">
+        <h4>无码整理默认值</h4>
+        <label>
+          <span>源目录</span>
+          <input v-model="settings.organizer_task_uncensored.source_root">
+        </label>
+        <label>
+          <span>输出目录</span>
+          <input v-model="settings.organizer_task_uncensored.output_root">
+        </label>
+        <label>
+          <span>参考范围前缀</span>
+          <input v-model="settings.organizer_task_uncensored.reference_scope_prefix">
+        </label>
+      </section>
+
+      <section class="settings-card">
+        <h4>国产整理默认值</h4>
+        <label>
+          <span>源目录</span>
+          <input v-model="settings.organizer_task_domestic.source_root">
+        </label>
+        <label>
+          <span>输出目录</span>
+          <input v-model="settings.organizer_task_domestic.output_root">
+        </label>
+        <label>
+          <span>参考范围前缀</span>
+          <input v-model="settings.organizer_task_domestic.reference_scope_prefix">
         </label>
       </section>
 
@@ -260,7 +306,7 @@ onMounted(() => {
       <button class="primary" :disabled="saving" @click="saveDefaults">
         {{ saving ? '保存中…' : '保存默认设置' }}
       </button>
-      <span>这些默认值会被整理任务、一键入库、AI 翻译、NFO 标签和欧美图片整理页面直接读取。</span>
+      <span>骑兵和欧美整理配置已彻底拆开，整理任务面板会分别读取各自的默认值。</span>
     </div>
   </section>
 </template>
@@ -281,11 +327,7 @@ onMounted(() => {
   align-items: center;
 }
 .settings-runtime span { color: #6b7280; font-size: 12px; }
-.settings-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 16px;
-}
+.settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
 .settings-card {
   background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,246,242,0.96));
   border: 1px solid rgba(226, 232, 240, 0.95);
@@ -316,11 +358,7 @@ onMounted(() => {
 }
 .settings-row input[type="checkbox"] { width: auto; }
 .settings-actions { justify-content: flex-start; align-items: center; }
-.task-success, .settings-test {
-  border-radius: 12px;
-  padding: 12px 14px;
-  font-size: 13px;
-}
+.task-success, .settings-test { border-radius: 12px; padding: 12px 14px; font-size: 13px; }
 .task-success { background: #e8f7ef; color: #176a46; }
 .settings-footer span { color: #6b7280; font-size: 13px; }
 @media (max-width: 860px) {

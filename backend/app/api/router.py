@@ -658,6 +658,8 @@ def reference_item_filters(q: str | None, status: str | None, source_id: int | N
             ReferenceItem.reference_path.ilike(term),
             ReferenceItem.reference_dir.ilike(term),
             ReferenceItem.filename.ilike(term),
+            ReferenceItem.embedded_filename.ilike(term),
+            ReferenceItem.normalized_embedded_filename.ilike(term),
         ))
     if status:
         filters.append(ReferenceItem.status == status)

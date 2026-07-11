@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models import MediaFile, MediaMetadata, OrganizerItem, OrganizerJob, ReferenceItem, ScanJob
+from app.services.strm_reference import normalize_embedded_filename
 
 
 ALLOWED_FIELDS = {"actor", "studio", "series", "identifier", "prefix", "title", "year", "filename", "ext"}
@@ -97,7 +98,7 @@ def _join_output_target(output_root: str, stripped_reference_dir: str, filename:
 
 
 def _display_to_container_path(display_target_path: str) -> str:
-    display = PurePosixPath(display_target_path).as_posix()
+    display = display_target_path.replace("\\", "/")
     host_root = PurePosixPath(settings.clouddrive_host_root).as_posix().rstrip("/")
     container_root = PurePosixPath(settings.clouddrive_container_root).as_posix().rstrip("/")
     if display == container_root or display.startswith(container_root + "/"):
@@ -107,6 +108,21 @@ def _display_to_container_path(display_target_path: str) -> str:
     if display.startswith(host_root + "/"):
         return container_root + display[len(host_root):]
     raise ValueError("target_path is outside configured CloudDrive roots")
+
+
+def _is_under_container_root(path: str) -> bool:
+    normalized = path.replace("\\", "/")
+    root = PurePosixPath(settings.clouddrive_container_root).as_posix().rstrip("/")
+    return normalized == root or normalized.startswith(root + "/")
+
+
+def _path_exists_if_checkable(path: str) -> bool:
+    normalized = path.replace("\\", "/")
+    if _is_under_container_root(normalized):
+        return Path(normalized).exists()
+    if re.match(r"^[A-Za-z]:/", normalized):
+        return Path(normalized).exists()
+    return True
 
 
 def _validate_reference_target(target_path: str, filename: str) -> tuple[bool, str | None]:
@@ -127,11 +143,26 @@ def _reference_stem(filename: str) -> str:
     return filename.rsplit(".", 1)[0] if "." in filename else filename
 
 
+def _strip_known_version_suffixes(stem: str) -> str:
+    base = stem
+    while True:
+        matched = False
+        for token in VERSION_SUFFIXES:
+            if base.casefold().endswith(token.casefold()):
+                base = base[: -len(token)]
+                matched = True
+                break
+        if not matched:
+            return base
+
+
 def _source_extension(filename: str) -> str:
     return PurePosixPath(filename).suffix
 
 
 def _identifier_pattern(identifier: str) -> re.Pattern[str]:
+    if "-" not in identifier:
+        return re.compile(rf"(?i)(?<![A-Za-z0-9]){re.escape(identifier)}(?![A-Za-z0-9])")
     prefix, number = identifier.split("-", 1)
     return re.compile(rf"(?i)(?<![A-Za-z0-9]){re.escape(prefix)}[-_ ]?{re.escape(number)}(?!\d)")
 
@@ -174,8 +205,9 @@ def build_reference_target_filename(
     reference_stem = _reference_stem(reference_filename)
     if not reference_stem:
         return None, "reference filename has no stem"
+    reference_base_stem = _strip_known_version_suffixes(reference_stem) or reference_stem
     suffix = _extract_version_suffix(source_filename, identifier)
-    return f"{identifier}{suffix}{ext}", None
+    return f"{reference_base_stem}{suffix}{ext}", None
 
 
 def plan_item(file: MediaFile, metadata: MediaMetadata | None, rule_template: str, fields: set[str]):
@@ -292,7 +324,7 @@ def _retry_missing_reference_media_file_ids(
             OrganizerJob.reference_source_id == reference_source_id,
             OrganizerJob.reference_scope_prefix == reference_scope_prefix,
             OrganizerJob.status == "success",
-            OrganizerItem.status == "missing_reference",
+            OrganizerItem.status.in_(("missing_reference", "unidentified")),
         )
         .distinct()
     )
@@ -321,6 +353,45 @@ def _reference_items_by_identifier(
         if item.identifier:
             result.setdefault(item.identifier, []).append(item)
     return result
+
+
+def _reference_items_by_embedded_filename(
+    db: Session,
+    reference_source_id: int,
+    reference_scope_prefix: str,
+) -> tuple[dict[str, list[ReferenceItem]], dict[str, list[ReferenceItem]]]:
+    rows = db.scalars(
+        select(ReferenceItem)
+        .where(
+            ReferenceItem.source_id == reference_source_id,
+            ReferenceItem.reference_dir.startswith(reference_scope_prefix),
+        )
+        .order_by(ReferenceItem.reference_path)
+    )
+    exact: dict[str, list[ReferenceItem]] = {}
+    normalized: dict[str, list[ReferenceItem]] = {}
+    for item in rows:
+        if item.embedded_filename:
+            exact.setdefault(item.embedded_filename, []).append(item)
+        if item.normalized_embedded_filename:
+            normalized.setdefault(item.normalized_embedded_filename, []).append(item)
+    return exact, normalized
+
+
+def _match_reference_by_filename(
+    file: MediaFile,
+    exact_map: dict[str, list[ReferenceItem]],
+    normalized_map: dict[str, list[ReferenceItem]],
+) -> tuple[list[ReferenceItem], str | None]:
+    exact_matches = exact_map.get(file.filename, [])
+    if exact_matches:
+        return exact_matches, "exact_embedded_filename"
+    normalized_filename = normalize_embedded_filename(file.filename)
+    if normalized_filename:
+        normalized_matches = normalized_map.get(normalized_filename, [])
+        if normalized_matches:
+            return normalized_matches, "normalized_embedded_filename"
+    return [], None
 
 
 def _reference_media_files(db: Session, source_id: int | None, *, changed_since: datetime | None = None):
@@ -428,6 +499,9 @@ def _run_reference_organizer_job(db: Session, job: OrganizerJob) -> None:
     prefix = job.reference_scope_prefix or DEFAULT_REFERENCE_SCOPE_PREFIX
     filename_strategy = job.filename_strategy or "preserve_source_filename"
     references = _reference_items_by_identifier(db, job.reference_source_id, prefix)
+    filename_exact_refs, filename_normalized_refs = _reference_items_by_embedded_filename(
+        db, job.reference_source_id, prefix
+    )
     counts = Counter()
     targets: dict[str, OrganizerItem | None] = {}
 
@@ -435,26 +509,41 @@ def _run_reference_organizer_job(db: Session, job: OrganizerJob) -> None:
     for file in _reference_media_files_for_job(db, job, changed_since=changed_since):
         target_path = None
         error = None
-        source_exists = Path(PurePosixPath(file.path).as_posix()).exists()
+        source_exists = _path_exists_if_checkable(file.path)
         if file.status == "missing" or not source_exists:
             status = "skipped"
             error = "file is missing in latest scan" if file.status == "missing" else "source_path does not exist on disk"
-        elif not file.identifier:
-            status = "unidentified"
-            error = "media file has no identifier"
         else:
-            matched = references.get(file.identifier, [])
+            matched: list[ReferenceItem] = []
+            match_mode = None
+            if file.identifier:
+                matched = references.get(file.identifier, [])
+                if matched:
+                    match_mode = "identifier"
             if not matched:
+                matched, match_mode = _match_reference_by_filename(
+                    file,
+                    filename_exact_refs,
+                    filename_normalized_refs,
+                )
+            if not matched and not file.identifier:
+                status = "unidentified"
+                error = "media file has no identifier"
+            elif not matched:
                 status = "missing_reference"
                 error = f"no reference item under {prefix}"
             elif len(matched) > 1 or any(item.status == "duplicate" for item in matched):
                 status = "duplicate_reference"
-                error = "multiple reference items matched this identifier"
+                error = (
+                    "multiple reference items matched this embedded filename"
+                    if match_mode in {"exact_embedded_filename", "normalized_embedded_filename"}
+                    else "multiple reference items matched this identifier"
+                )
             else:
                 reference = matched[0]
                 target_filename, filename_error = build_reference_target_filename(
                     file.filename,
-                    file.identifier,
+                    file.identifier or _reference_stem(reference.filename),
                     reference.filename,
                     filename_strategy,
                 )
